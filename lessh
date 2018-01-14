@@ -1,0 +1,66 @@
+#! /bin/bash
+
+if [ ! -f "$1" ]; then
+  echo 'Please provide a valid file' >&2
+  exit 1
+fi
+
+tput sc
+tput smcup
+
+leave() {
+  tput cnorm
+  tput rmcup
+  tput rc
+  exit
+}
+
+trap leave INT TERM
+
+tput civis
+clear
+
+while IFS= read -r line; do
+  output="$output$line
+"
+  nb_lines="$((nb_lines + 1))"
+done < "$1"
+
+
+print_line() {
+  printf '%s\n' "$output" | sed -n "$1"p
+}
+
+screen_nb_lines() {
+  printf '%s\n' "$(($(tput lines) - 1))"
+}
+
+index=1
+print_line 1,"$(screen_nb_lines)"
+
+while read -n 1 -s key; do
+  case "$key" in
+    f)
+      next_line_num="$((index + $(screen_nb_lines)))"
+      if [ "$next_line_num" -le "$nb_lines" ]; then
+        index="$((index + 1))"
+        tput cup "$(screen_nb_lines)" 0
+        print_line "$next_line_num"
+      fi
+      ;;
+    b)
+      next_line_num="$((index - 1))"
+      if [ "$next_line_num" -ge 1 ]; then
+        index="$((index - 1))"
+        tput cup 0 0
+        tput il 1
+        print_line "$next_line_num"
+        tput cup "$(screen_nb_lines)" 0
+        tput dl 1
+      fi
+      ;;
+    q)
+      leave
+      ;;
+  esac
+done
