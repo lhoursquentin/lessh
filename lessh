@@ -28,6 +28,7 @@ screen_nb_lines() {
 }
 
 process_input() {
+  index=1
   output=
   nb_lines=0
   while IFS= read -r line; do
@@ -38,6 +39,20 @@ process_input() {
       printf '%s\n' "$line"
     fi
   done
+}
+
+print_bar() {
+  color="$1"
+  shift
+  tput cup "$(($(screen_nb_lines) + 1))" 0
+  printf '%b%s' "$color" "$padding"
+  tput cup "$(($(screen_nb_lines) + 1))" 0
+  printf "$@"
+}
+
+print_status_bar() {
+  print_bar '\e[48;5;8m' '%s%s' "${filename+File: $filename - }" 'Press q to quit'
+  printf '\e[0m'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -73,8 +88,10 @@ else
   process_input
 fi
 
-index=1
-print_line 1,"$(screen_nb_lines)"
+padding="$(for i in $(seq "$(tput cols)"); do printf ' '; done; printf x)"
+padding="${padding%?}"
+
+print_status_bar
 
 while read -n 1 -s key; do
   case "$key" in
@@ -83,7 +100,9 @@ while read -n 1 -s key; do
       if [ "$next_line_num" -le "$nb_lines" ]; then
         index="$((index + 1))"
         tput cup "$(screen_nb_lines)" 0
+        tput el 1
         print_line "$next_line_num"
+        print_status_bar
       fi
       ;;
     b)
@@ -93,24 +112,21 @@ while read -n 1 -s key; do
         tput cup 0 0
         tput il 1
         print_line "$next_line_num"
-        tput cup "$(screen_nb_lines)" 0
-        tput dl 1
+        print_status_bar
       fi
       ;;
     q)
       leave
       ;;
     '>')
-      tput cup "$(($(screen_nb_lines) + 1))" 0
+      print_bar '\e[1;44m' '> '
       tput cnorm
-      padding="$(for i in $(seq "$(tput cols)"); do printf ' '; done; printf x)"
-      printf '\e[1;44m>%s' "${padding%????}"
-      tput cup "$(($(screen_nb_lines) + 1))" 2
       IFS= read -r cmd
       printf '\e[0m'
       tput civis
       printf '%s\n' "$cmd" >> ~/.lessh_history
+      # FIXME: pipe destroys output and nb_lines after use
       printf '%s\n' "$output" | eval "$cmd" | { clear; process_input; }
-
+      print_status_bar
   esac
 done < /dev/tty
