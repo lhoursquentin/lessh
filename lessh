@@ -28,6 +28,8 @@ screen_nb_lines() {
 }
 
 process_input() {
+  output=
+  nb_lines=0
   while IFS= read -r line; do
     output="$output$line
 "
@@ -48,7 +50,7 @@ while [ "$#" -gt 0 ]; do
       # TODO add multiple files support
       [ -n "$filename" ] && usage 1
       if [ ! -f "$1" ];then
-        printf '%s: No such file or directory' "$1" >&2
+        printf '%s: No such file or directory\n' "$1" >&2
         usage 1
       fi
       filename="$1"
@@ -98,5 +100,17 @@ while read -n 1 -s key; do
     q)
       leave
       ;;
+    '>')
+      tput cup "$(($(screen_nb_lines) + 1))" 0
+      tput cnorm
+      padding="$(for i in $(seq "$(tput cols)"); do printf ' '; done; printf x)"
+      printf '\e[1;44m>%s' "${padding%????}"
+      tput cup "$(($(screen_nb_lines) + 1))" 2
+      IFS= read -r cmd
+      printf '\e[0m'
+      tput civis
+      printf '%s\n' "$cmd" >> ~/.lessh_history
+      printf '%s\n' "$output" | eval "$cmd" | { clear; process_input; }
+
   esac
 done < /dev/tty
