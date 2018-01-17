@@ -125,8 +125,10 @@ while read -n 1 -s key; do
       printf '\e[0m'
       tput civis
       printf '%s\n' "$cmd" >> ~/.lessh_history
-      # FIXME: pipe destroys output and nb_lines after use
-      printf '%s\n' "$output" | eval "$cmd" | { clear; process_input; }
+      output="$(printf '%s\n' "$output" | eval "$cmd")"
+      lines="$(printf '%s\n' "$output" | wc -l)"
+      clear
+      print_line "1,$(screen_nb_lines)"
       print_status_bar
   esac
 done < /dev/tty
