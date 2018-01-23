@@ -23,6 +23,7 @@ print_line() {
   printf '%s\n' "$output" | sed -n "$1"p
 }
 
+# cache value?
 screen_nb_lines() {
   printf '%s\n' "$(($(tput lines) - 1))"
 }
@@ -55,6 +56,28 @@ print_status_bar() {
   printf '\e[0m'
 }
 
+scroll_up() {
+  next_line_num="$((index - 1))"
+  if [ "$next_line_num" -ge 1 ]; then
+    index="$next_line_num"
+    tput cup 0 0
+    tput il 1
+    print_line "$next_line_num"
+    print_status_bar
+  fi
+}
+
+scroll_down() {
+  next_line_num="$((index + $(screen_nb_lines)))"
+  if [ "$next_line_num" -le "$nb_lines" ]; then
+    index="$((index + 1))"
+    tput cup "$(screen_nb_lines)" 0
+    tput el 1
+    print_line "$next_line_num"
+    print_status_bar
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help)
@@ -73,6 +96,8 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+readonly stderr_file=/tmp/lessh_stderr
 
 trap leave INT TERM
 
@@ -96,39 +121,47 @@ print_status_bar
 while read -n 1 -s key; do
   case "$key" in
     f)
-      next_line_num="$((index + $(screen_nb_lines)))"
-      if [ "$next_line_num" -le "$nb_lines" ]; then
-        index="$((index + 1))"
-        tput cup "$(screen_nb_lines)" 0
-        tput el 1
-        print_line "$next_line_num"
-        print_status_bar
-      fi
+      scroll_down
       ;;
     b)
-      next_line_num="$((index - 1))"
-      if [ "$next_line_num" -ge 1 ]; then
-        index="$next_line_num"
-        tput cup 0 0
-        tput il 1
-        print_line "$next_line_num"
-        print_status_bar
-      fi
+      scroll_up
       ;;
     q)
       leave
       ;;
-    '>')
-      print_bar '\e[1;44m' '> '
+    ':')
+      print_bar '\e[1;44m' "$key"
       tput cnorm
-      IFS= read -r cmd
+      enter=false
+      if IFS= read -r cmd; then
+        enter=true
+        index="$((index + 1))"
+      fi
       printf '\e[0m'
       tput civis
-      printf '%s\n' "$cmd" >> ~/.lessh_history
-      output="$(printf '%s\n' "$output" | eval "$cmd")"
-      lines="$(printf '%s\n' "$output" | wc -l)"
-      clear
-      print_line "1,$(screen_nb_lines)"
-      print_status_bar
+      if [ -n "$cmd" ] &&
+         printf '%s\n' "$cmd" >> ~/.lessh_history &&
+         {
+           new_output="$(
+             printf '%s\n' "$output" | eval "$cmd" 2> "$stderr_file"
+           )"
+           # FIXME print error on new screen or just notify failure
+         }
+      then
+        output="$new_output"
+        unset new_output
+        lines="$(printf '%s\n' "$output" | wc -l)"
+        clear
+        print_line "1,$(screen_nb_lines)"
+        print_status_bar
+      else
+        if "$enter"; then
+          tput cup "$(screen_nb_lines)" 0
+          tput el 1
+          scroll_up
+        else
+          print_status_bar
+        fi
+      fi
   esac
 done < /dev/tty
