@@ -52,7 +52,7 @@ print_bar() {
 }
 
 print_status_bar() {
-  print_bar '\e[48;5;8m' '%s%s' "${filename+File: $filename - }" 'Press q to quit'
+  print_bar '\e[48;5;8m' '%s%s' "${filename+File: $filename - }" "${1-Press q to quit}"
   printf '\e[0m'
 }
 
@@ -76,6 +76,64 @@ scroll_down() {
     print_line "$next_line_num"
     print_status_bar
   fi
+}
+
+bar_handler() {
+  key="$1"
+  color="$2"
+  action_func="$3"
+  print_bar "$color" "$key"
+  tput cnorm
+  enter=false
+  if IFS= read -r input; then
+    enter=true
+    index="$((index + 1))"
+  fi
+  printf '\e[0m'
+  tput civis
+  if ! {
+         [ -n "$input" ] &&
+         printf '%s\n' "$key$input" >> ~/.lessh_history &&
+         "$action_func" "$input"
+       }
+  then
+    if "$enter"; then
+      tput cup "$(screen_nb_lines)" 0
+      tput el 1
+      scroll_up
+      # TODO remove duplicate status bar print
+      [ -n "$input" ] && print_status_bar "$status_msg"
+    else
+      print_status_bar
+    fi
+  fi
+}
+
+action_handler() {
+  error_msg="$1"
+  shift
+  if new_output="$(printf '%s\n' "$output" | "$@" 2> "$stderr_file")"; then
+    output="$new_output"
+    unset new_output
+    lines="$(printf '%s\n' "$output" | wc -l)"
+    clear
+    index=1
+    print_line "1,$(screen_nb_lines)"
+    print_status_bar
+    return 0
+  else
+    status_msg="$error_msg"
+    return 1
+  fi
+}
+
+eval_exec() {
+  action_handler 'Command failed' eval "$1"
+}
+
+search_exec() {
+  # FIXME grep always returns 0 because of |$, need to find another way
+  action_handler 'No occurence found' grep --color=always -- "$1"'\|$'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -129,39 +187,11 @@ while read -n 1 -s key; do
     q)
       leave
       ;;
+    '/')
+      bar_handler "$key" '\e[1;45m' search_exec
+      ;;
     ':')
-      print_bar '\e[1;44m' "$key"
-      tput cnorm
-      enter=false
-      if IFS= read -r cmd; then
-        enter=true
-        index="$((index + 1))"
-      fi
-      printf '\e[0m'
-      tput civis
-      if [ -n "$cmd" ] &&
-         printf '%s\n' "$cmd" >> ~/.lessh_history &&
-         {
-           new_output="$(
-             printf '%s\n' "$output" | eval "$cmd" 2> "$stderr_file"
-           )"
-           # FIXME print error on new screen or just notify failure
-         }
-      then
-        output="$new_output"
-        unset new_output
-        lines="$(printf '%s\n' "$output" | wc -l)"
-        clear
-        print_line "1,$(screen_nb_lines)"
-        print_status_bar
-      else
-        if "$enter"; then
-          tput cup "$(screen_nb_lines)" 0
-          tput el 1
-          scroll_up
-        else
-          print_status_bar
-        fi
-      fi
+      bar_handler "$key" '\e[1;44m' eval_exec
+      ;;
   esac
 done < /dev/tty
