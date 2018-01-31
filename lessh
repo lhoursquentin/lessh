@@ -23,12 +23,13 @@ print_line() {
   printf '%s\n' "$output" | sed -n "$1"p
 }
 
-# cache value?
+# TODO cache value?
 screen_nb_lines() {
   printf '%s\n' "$(($(tput lines) - 1))"
 }
 
 process_input() {
+  clear
   index=1
   output=
   nb_lines=0
@@ -40,6 +41,7 @@ process_input() {
       printf '%s\n' "$line"
     fi
   done
+  print_status_bar
 }
 
 print_bar() {
@@ -52,8 +54,19 @@ print_bar() {
 }
 
 print_status_bar() {
-  print_bar '\e[48;5;8m' '%s%s' "${filename+File: $filename - }" "${1-Press q to quit}"
+  status_msg="$error_msg"
+  # FIXME dash fails when variable in substitution contains spaces
+  #+Need to check if there's another way
+  #+This is also pretty dirty
+  : "${status_msg:=$success_msg}"
+  : "${status_msg:=Press q to quit}"
+  print_bar '\e[48;5;8m' '\e[1m%s%b%s' \
+    "${filename+File: $filename - }" \
+    "${success_msg:+\e[1;32m}${error_msg:+\e[1;31m}" \
+    "$status_msg"
   printf '\e[0m'
+  error_msg=
+  success_msg=
 }
 
 scroll_up() {
@@ -101,8 +114,6 @@ bar_handler() {
       tput cup "$(screen_nb_lines)" 0
       tput el 1
       scroll_up
-      # TODO remove duplicate status bar print
-      [ -n "$input" ] && print_status_bar "$status_msg"
     else
       print_status_bar
     fi
@@ -113,6 +124,7 @@ action_handler() {
   error_msg="$1"
   shift
   if new_output="$(printf '%s\n' "$output" | "$@" 2> "$stderr_file")"; then
+    error_msg= #FIXME dirty
     output="$new_output"
     unset new_output
     lines="$(printf '%s\n' "$output" | wc -l)"
@@ -122,18 +134,44 @@ action_handler() {
     print_status_bar
     return 0
   else
-    status_msg="$error_msg"
     return 1
   fi
 }
 
 eval_exec() {
-  action_handler 'Command failed' eval "$1"
+  action_handler "Command '$1' failed" eval "$1"
 }
 
 search_exec() {
   # FIXME grep always returns 0 because of |$, need to find another way
   action_handler 'No occurence found' grep --color=always -- "$1"'\|$'
+}
+
+builtin_cmd_exec() {
+  # FIXME forcing IFS splitting is a bad idea
+  set -- $1
+  case "$1" in
+    q|quit)
+      leave
+      ;;
+    o|open)
+      if [ -f "$2" ]; then
+        filename="$2"
+        success_msg="Successfully opened file: '$2' "
+        process_input < "$2"
+      elif [ -z "$2" ]; then
+        error_msg='No file provided'
+        return 1
+      else
+        error_msg="No such file or directory: '$2'"
+        return 1
+      fi
+      ;;
+    *)
+      error_msg="Unknown command: '$*'"
+      return 1
+      ;;
+  esac
 }
 
 while [ "$#" -gt 0 ]; do
@@ -163,18 +201,15 @@ tput sc
 tput smcup
 tput civis
 
-clear
+# FIXME also needs to be recalculated in case of screen size modification
+padding="$(for i in $(seq "$(tput cols)"); do printf ' '; done; printf x)"
+padding="${padding%?}"
 
 if [ -n "$filename" ]; then
   process_input < "$filename"
 else
   process_input
 fi
-
-padding="$(for i in $(seq "$(tput cols)"); do printf ' '; done; printf x)"
-padding="${padding%?}"
-
-print_status_bar
 
 while read -n 1 -s key; do
   case "$key" in
@@ -190,8 +225,11 @@ while read -n 1 -s key; do
     '/')
       bar_handler "$key" '\e[1;45m' search_exec
       ;;
+    '>')
+      bar_handler "$key " '\e[1;44m' eval_exec
+      ;;
     ':')
-      bar_handler "$key" '\e[1;44m' eval_exec
+      bar_handler "$key" '\e[1;43m' builtin_cmd_exec
       ;;
   esac
 done < /dev/tty
